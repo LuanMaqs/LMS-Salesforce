@@ -1,5 +1,5 @@
 public with sharing class EnrollmentService {
-    public static void studentEnrollmentRules(String studentId, String courseId, String EnrollmentDate, Id StatusId, Id InstructorId) {
+    public static void studentEnrollmentRules(Id studentId, Id courseId, Date enrollmentDate, Id statusId, Id instructorId) {
        
         List<Status__c> StatusIds = [SELECT Id 
         FROM Status__c 
