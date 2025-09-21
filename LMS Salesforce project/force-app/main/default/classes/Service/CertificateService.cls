@@ -16,6 +16,8 @@ public with sharing class CertificateService {
         if(enrollment.Status__c == statusMap.get('Completed')){
             throw new AuraHandledException('Enrollment is completed');
         }
+        enrollment.Status__c = completedStatusId;
+        update enrollment;
 
         Certificate__c cert = new Certificate__c();
         cert.Enrollment__c = enrollment.Id;
@@ -25,8 +27,7 @@ public with sharing class CertificateService {
         cert.Status__c = completedStatusId;
         insert cert;
 
-        enrollment.Status__c = completedStatusId;
-        update enrollment;
+        
         
 
     }

@@ -22,7 +22,7 @@ public with sharing class EnrollmentService {
         }
     }
 
-    public static void enroll(String studentId, String courseId, Id InstructorId, Date EnrollmentDate, Id StatusId) {
+    public static void enroll(Id studentId, Id courseId, Id InstructorId, Date EnrollmentDate, Id StatusId) {
         List<Status__c> StatusIds = [SELECT Id 
         FROM Status__c 
         WHERE Name 
