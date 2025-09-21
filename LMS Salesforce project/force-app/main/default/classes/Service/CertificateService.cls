@@ -17,7 +17,9 @@ public with sharing class CertificateService {
             throw new AuraHandledException('Enrollment is completed');
         }
         enrollment.Status__c = completedStatusId;
-        update enrollment;
+        update enrollment;  
+
+        
 
         Certificate__c cert = new Certificate__c();
         cert.Enrollment__c = enrollment.Id;
@@ -26,9 +28,16 @@ public with sharing class CertificateService {
         cert.Course__c = courseId;
         cert.Status__c = completedStatusId;
         insert cert;
-
-        
-        
-
+        sendCompletionEmail(studentId);
     }
+
+    public static void sendCompletionEmail(Id studentId) {
+        Student__c student = [SELECT Id, Email__c FROM Student__c WHERE Id = :studentId LIMIT 1];
+        Messaging.SingleEmailMessage mail = new Messaging.SingleEmailMessage();
+        mail.setToAddresses(new String[] { student.Email__c });
+        mail.setSubject('Parabéns pela conclusão do curso!');
+        mail.setPlainTextBody('Você concluiu com sucesso o curso. Seu certificado está disponível.');
+        Messaging.sendEmail(new List<Messaging.Email>{ mail });
+    }
+    
 }

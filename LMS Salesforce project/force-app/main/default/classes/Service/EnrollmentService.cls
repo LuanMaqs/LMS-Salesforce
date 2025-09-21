@@ -1,133 +1,131 @@
 public with sharing class EnrollmentService {
-    public static void studentEnrollmentRules(Id studentId, Id courseId, Date enrollmentDate, Id statusId, Id instructorId) {
-       
-        List<Status__c> StatusIds = [SELECT Id 
-        FROM Status__c 
-        WHERE Name 
-        IN ('Active', 'Inactive', 'Pending', 'On Hold')];
 
-        Set<Id> statusIdsSet = new Set<Id>();
-        for(Status__c stid : StatusIds){
-            statusIdsSet.add(stid.Id);
+    public static void enrollStudents(List<Enrollment__c> enrollmentsToInsert) {
+        if(enrollmentsToInsert.isEmpty()) return;
+
+        Id onHoldStatusId = [SELECT Id FROM Status__c WHERE Name = 'On Hold' LIMIT 1].Id;
+        Set<String> studentNames = new Set<String>();
+        Set<String> instructorNames = new Set<String>();
+        for(Enrollment__c e : enrollmentsToInsert){
+            if(e.Student__c == null && e.Student_Name__c != null) studentNames.add(e.Student_Name__c);
+            if(e.Instructor__c == null && e.Instructor_Name__c != null) instructorNames.add(e.Instructor_Name__c);
         }
 
-        if(studentId == null){
-            throw new AuraHandledException('Student ID is required');
+        Map<String, Student__c> existingStudents = new Map<String, Student__c>();
+        for(Student__c s : [SELECT Id, Name FROM Student__c WHERE Name IN :studentNames]){
+            existingStudents.put(s.Name, s);
         }
-        if(courseId == null){
-            throw new AuraHandledException('Course ID is required');
+
+        Map<String, Instructor__c> existingInstructors = new Map<String, Instructor__c>();
+        for(Instructor__c i : [SELECT Id, Name FROM Instructor__c WHERE Name IN :instructorNames]){
+            existingInstructors.put(i.Name, i);
         }
-        if(EnrollmentDate == null){
-            throw new AuraHandledException('Enrollment Date is required');
+
+        List<Student__c> newStudents = new List<Student__c>();
+        for(String name : studentNames){
+            if(!existingStudents.containsKey(name)){
+                Student__c s = new Student__c(Name = name);
+                newStudents.add(s);
+                existingStudents.put(name, s);
+            }
         }
+        if(!newStudents.isEmpty()) insert newStudents;
+
+        List<Instructor__c> newInstructors = new List<Instructor__c>();
+        for(String name : instructorNames){
+            if(!existingInstructors.containsKey(name)){
+                Instructor__c i = new Instructor__c(Name = name);
+                newInstructors.add(i);
+                existingInstructors.put(name, i);
+            }
+        }
+        if(!newInstructors.isEmpty()) insert newInstructors;
+
+        for(Enrollment__c e : enrollmentsToInsert){
+            if(e.Student__c == null && e.Student_Name__c != null){
+                e.Student__c = existingStudents.get(e.Student_Name__c).Id;
+            }
+            if(e.Instructor__c == null && e.Instructor_Name__c != null){
+                e.Instructor__c = existingInstructors.get(e.Instructor_Name__c).Id;
+            }
+            e.Status__c = onHoldStatusId;
+        }
+
+        insert enrollmentsToInsert;
     }
-
-    public static void enroll(Id studentId, Id courseId, Id InstructorId, Date EnrollmentDate, Id StatusId) {
-        List<Status__c> StatusIds = [SELECT Id 
-        FROM Status__c 
-        WHERE Name 
-        IN ('Active', 'Inactive', 'Pending', 'On Hold')];
-        
-        Set<Id> statusIdsSet = new Set<Id>();
-        for (Status__c st : StatusIds) {
-            statusIdsSet.add(st.Id);
+    public static void sendEnrollmentEmails(List<Enrollment__c> enrollments) {
+        Set<Id> studentIds = new Set<Id>();
+        Set<Id> courseIds  = new Set<Id>();
+        for (Enrollment__c e : enrollments) {
+            if(e.Student__c != null) studentIds.add(e.Student__c);
+            if(e.Course__c  != null) courseIds.add(e.Course__c);
         }
-
-        List<Enrollment__c> existingEnrollments = [SELECT Id, Status__c
-        FROM Enrollment__c 
-        WHERE Student__c = :studentId 
-        AND Course__c = :courseId 
-        AND Status__c IN :statusIdsSet];
-        
-        if(!existingEnrollments.isEmpty()){
-            throw new AuraHandledException('Student is already enrolled in the course');
+        Map<Id, Student__c> studentMap = new Map<Id, Student__c>(
+            [SELECT Id, Name, Email__c FROM Student__c WHERE Id IN :studentIds]
+        );
+        Map<Id, Course__c> courseMap = new Map<Id, Course__c>(
+            [SELECT Id, Name FROM Course__c WHERE Id IN :courseIds]
+        );
+    
+        List<Messaging.SingleEmailMessage> emails = new List<Messaging.SingleEmailMessage>();
+    
+        for (Enrollment__c e : enrollments) {
+            Student__c s = studentMap.get(e.Student__c);
+            Course__c  c = courseMap.get(e.Course__c);
+    
+            if (s != null && String.isNotBlank(s.Email__c)) {
+                Messaging.SingleEmailMessage mail = new Messaging.SingleEmailMessage();
+                mail.setToAddresses(new String[]{ s.Email__c });
+                mail.setSubject('Congrats ' + s.Name + '! You are enrolled in ' + c.Name);
+                mail.setPlainTextBody('Welcome! Complete the course to receive your certificate.');
+                emails.add(mail);
+            }
         }
-         
-        Enrollment__c enroll = new Enrollment__c();
-        enroll.Student__c = studentId;
-        enroll.Course__c = courseId;
-        enroll.Instructor__c = InstructorId;
-        enroll.EnrollmentDate__c = EnrollmentDate;
-        enroll.Status__c = StatusId;
-        insert enroll;
+    
+        if (!emails.isEmpty()) Messaging.sendEmail(emails);
     }
-
-    public static void cancelEnroll(Id enrollmentId){
-        if(enrollmentId == null){
-            throw new AuraHandledException('Course is not found');
-        }
-
-        Enrollment__c enrollment = [SELECT Id, Status__c FROM Enrollment__c WHERE Id = :enrollmentId LIMIT 1];
-
-        Map<String, Id> statusByName = new Map<String, Id>();
+    public static void cancelEnrollments(List<Enrollment__c> enrollments) {
+        Map<String, Id> statusMap = new Map<String, Id>();
         for (Status__c st : [SELECT Id, Name FROM Status__c WHERE Name IN ('Canceled','Completed')]) {
-            statusByName.put(st.Name, st.Id);
+            statusMap.put(st.Name, st.Id);
         }
 
-        if (enrollment.Status__c == statusByName.get('Completed')){
-            throw new AuraHandledException('Cannot cancel a completed enrollment');
-        }
-        if (enrollment.Status__c == statusByName.get('Canceled')){
-            throw new AuraHandledException('Enrollment is already canceled');
+        List<Enrollment__c> toUpdate = new List<Enrollment__c>();
+        for (Enrollment__c e : enrollments) {
+            if(e.Status__c != statusMap.get('Canceled') && e.Status__c != statusMap.get('Completed')) {
+                e.Status__c = statusMap.get('Canceled');
+                toUpdate.add(e);
+            }
         }
 
-        enrollment.Status__c = statusByName.get('Canceled');
-        update enrollment;
+        if(!toUpdate.isEmpty()) update toUpdate;
     }
-
-
-    public static void putOnHold(Id enrollmentId){
-        if(enrollmentId == null){
-            throw new AuraHandledException('Id null');
-        }
-
-        Enrollment__c enrollment = [SELECT Id, Status__c FROM Enrollment__c WHERE Id = :enrollmentId LIMIT 1];
-
-        Map<String, Id> statusByName = new Map<String, Id>();
+    public static void putOnHoldEnrollments(List<Enrollment__c> enrollments) {
+        Map<String, Id> statusMap = new Map<String, Id>();
         for (Status__c st : [SELECT Id, Name FROM Status__c WHERE Name IN ('On Hold','Completed')]) {
-            statusByName.put(st.Name, st.Id);
+            statusMap.put(st.Name, st.Id);
         }
 
-        if (enrollment.Status__c == statusByName.get('Completed')){
-            throw new AuraHandledException('Cannot put on hold a completed enrollment');
-        }
-        if (enrollment.Status__c == statusByName.get('On Hold')){
-            throw new AuraHandledException('Enrollment is already On Hold');
+        List<Enrollment__c> toUpdate = new List<Enrollment__c>();
+        for (Enrollment__c e : enrollments) {
+            if(e.Status__c != statusMap.get('On Hold') && e.Status__c != statusMap.get('Completed')) {
+                e.Status__c = statusMap.get('On Hold');
+                toUpdate.add(e);
+            }
         }
 
-        enrollment.Status__c = statusByName.get('On Hold');
-        update enrollment;
+        if(!toUpdate.isEmpty()) update toUpdate;
     }
-
-    public static void approveEnroll(Id enrollmentId){
-        if(enrollmentId == null){
-            throw new AuraHandledException('Enrollment ID is required');
+    public static void approveEnrollments(List<Enrollment__c> enrollments) {
+        Map<String, Id> statusMap = new Map<String, Id>();
+        for (Status__c st : [SELECT Id, Name FROM Status__c WHERE Name IN ('Approved','On Hold','Canceled','Completed')]) {
+            statusMap.put(st.Name, st.Id);
         }
 
-        Enrollment__c enrollment = [SELECT Id, Student__c, Course__c, Status__c
-                                    FROM Enrollment__c
-                                    WHERE Id = :enrollmentId
-                                    LIMIT 1];
-
-        Map<String, Id> statusByName = new Map<String, Id>();
-        for (Status__c st : [SELECT Id, Name FROM Status__c WHERE Name IN ('Approved','Rejected','On Hold','Canceled','Completed')]) {
-            statusByName.put(st.Name, st.Id);
+        for (Enrollment__c e : enrollments) {
+            if(e.Status__c == statusMap.get('Approved')) {
+                CertificateService.generateCertificate(e.Student__c, e.Course__c, e.Id);
+            }
         }
-
-        if (enrollment.Status__c == statusByName.get('On Hold')) {
-            throw new AuraHandledException('Cannot approve while enrollment is On Hold');
-        }
-        if (enrollment.Status__c == statusByName.get('Canceled')) {
-            throw new AuraHandledException('Cannot approve a canceled enrollment');
-        }
-        if (enrollment.Status__c == statusByName.get('Completed')) {
-            throw new AuraHandledException('Enrollment is already completed');
-        }
-        if (enrollment.Status__c != statusByName.get('Approved')) {
-            throw new AuraHandledException('Cannot generate certificate: enrollment is not Approved');
-        }
-
-        CertificateService.generateCertificate(enrollment.Student__c, enrollment.Course__c, enrollment.Id);
     }
-
 }

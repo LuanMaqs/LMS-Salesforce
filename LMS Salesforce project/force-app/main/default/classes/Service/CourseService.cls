@@ -1,8 +1,15 @@
 public with sharing class CourseService {
     public static void createCourse(Course__c course) {
         insert course;
-    }
 
+        EmailManager.sendMail(
+            'lm7007fernandes@gmail.com',
+            'novo curso criado',
+            'O curso' + course.Name + 'foi criado com sucesso'
+        );
+    }
+    
+    
     public static void updateCourse(Course__c course){
         update course;
     }
