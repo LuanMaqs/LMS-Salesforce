@@ -3,7 +3,7 @@ public with sharing class CertificateTriggerHandler {
         for (Certificate__c cert : newCert) {
             Certificate__c oldCert = oldMap.get(cert.Id); 
             Id studentId = cert.Student__c;
-            Id courseId = cert.Course__c;
+            Id courseId = cert.CourseCertificate__c;
             Id enrollmentId = cert.Enrollment__c;
 
 
